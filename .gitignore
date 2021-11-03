@@ -1,0 +1,8 @@
+.idea/
+cmake-build-debug/
+
+*.onnx
+*.trt
+*.mp4
+*.avi
+*.mpg
