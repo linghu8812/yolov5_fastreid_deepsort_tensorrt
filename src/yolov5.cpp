@@ -43,7 +43,7 @@ std::vector<std::vector<DetectRes>> YOLOv5::InferenceImages(std::vector<cv::Mat>
     auto boxes = postProcess(vec_img, output);
     auto r_end = std::chrono::high_resolution_clock::now();
     float total_res = std::chrono::duration<float, std::milli>(r_end - r_start).count();
-    std::cout << "Post process take: " << total_res << " ms." << std::endl;
+    std::cout << "yolov5 postprocess take: " << total_res << " ms." << std::endl;
     delete output;
     return boxes;
 }

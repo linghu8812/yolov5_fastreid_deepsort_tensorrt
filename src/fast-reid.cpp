@@ -12,73 +12,67 @@ fastreid::fastreid(const YAML::Node &config) {
 
 fastreid::~fastreid() = default;
 
-//void fastreid::EngineInference(const std::vector<std::string> &image_list, const int &outSize, void **buffers,
-//                              const std::vector<int64_t> &bufferSize, cudaStream_t stream) {
-//    int index = 0;
-//    int batch_id = 0;
-//    std::vector<cv::Mat> vec_Mat(BATCH_SIZE);
-//    cv::Mat face_feature(image_list.size(), outSize, CV_32FC1);
-//    float total_time = 0;
-//    for (const std::string &image_name : image_list)
-//    {
-//        index++;
-//        std::cout << "Processing: " << image_name << std::endl;
-//        cv::Mat src_img = cv::imread(image_name);
-//        if (src_img.data)
-//        {
-//            cv::Mat rgb_img;
-//            cv::cvtColor(src_img, rgb_img, cv::COLOR_RGB2BGR);
-//            vec_Mat[batch_id] = rgb_img;
-//            batch_id++;
-//        }
-//        if (batch_id == BATCH_SIZE or index == image_list.size())
-//        {
-//            auto t_start_pre = std::chrono::high_resolution_clock::now();
-//            std::cout << "prepareImage" << std::endl;
-//            std::vector<float>curInput = prepareImage(vec_Mat);
-//            auto t_end_pre = std::chrono::high_resolution_clock::now();
-//            float total_pre = std::chrono::duration<float, std::milli>(t_end_pre - t_start_pre).count();
-//            std::cout << "prepare image take: " << total_pre << " ms." << std::endl;
-//            total_time += total_pre;
-//            batch_id = 0;
-//            if (!curInput.data()) {
-//                std::cout << "prepare images ERROR!" << std::endl;
-//                continue;
-//            }
-//            // DMA the input to the GPU,  execute the batch asynchronously, and DMA it back:
-//            std::cout << "host2device" << std::endl;
-//            cudaMemcpyAsync(buffers[0], curInput.data(), bufferSize[0], cudaMemcpyHostToDevice, stream);
-//
-//            // do inference
-//            std::cout << "execute" << std::endl;
-//            auto t_start = std::chrono::high_resolution_clock::now();
-//            context->execute(BATCH_SIZE, buffers);
-//            auto t_end = std::chrono::high_resolution_clock::now();
-//            float total_inf = std::chrono::duration<float, std::milli>(t_end - t_start).count();
-//            std::cout << "Inference take: " << total_inf << " ms." << std::endl;
-//            total_time += total_inf;
-//            std::cout << "execute success" << std::endl;
-//            std::cout << "device2host" << std::endl;
-//            std::cout << "post process" << std::endl;
-//            auto r_start = std::chrono::high_resolution_clock::now();
-//            float out[outSize * BATCH_SIZE];
-//            cudaMemcpyAsync(out, buffers[1], bufferSize[1], cudaMemcpyDeviceToHost, stream);
-//            cudaStreamSynchronize(stream);
-//            int rowSize = index % BATCH_SIZE == 0 ? BATCH_SIZE : index % BATCH_SIZE;
-//            cv::Mat feature(rowSize, outSize, CV_32FC1);
-//            ReshapeandNormalize(out, feature, rowSize, outSize);
-//            feature.copyTo(face_feature.rowRange(index - rowSize, index));
-//            auto r_end = std::chrono::high_resolution_clock::now();
-//            float total_res = std::chrono::duration<float, std::milli>(r_end - r_start).count();
-//            std::cout << "Post process take: " << total_res << " ms." << std::endl;
-//            total_time += total_res;
-//            vec_Mat = std::vector<cv::Mat>(BATCH_SIZE);
-//        }
-//    }
-//    std::cout << "Average processing time is " << total_time / image_list.size() << "ms" << std::endl;
-//    cv::Mat similarity = face_feature * face_feature.t();
-//    std::cout << "The similarity matrix of the image folder is:\n" << similarity << "!" << std::endl;
-//}
+std::vector<cv::Mat> fastreid::InferenceImages(std::vector<cv::Mat> &vec_img) {
+    std::vector<cv::Mat> res_feature;
+    int start_index = 0, end_index = 0;
+    auto start_time = std::chrono::high_resolution_clock::now();
+    while (end_index < (int)vec_img.size()) {
+        end_index = std::min(int(start_index + BATCH_SIZE), int(vec_img.size()));
+        std::vector<cv::Mat>::const_iterator iter_1 = vec_img.begin() + start_index;
+        std::vector<cv::Mat>::const_iterator iter_2 = vec_img.begin() + end_index;
+        std::vector<cv::Mat> sub_vec_img(iter_1, iter_2);
+        auto t_start_pre = std::chrono::high_resolution_clock::now();
+        std::vector<float> image_data = prepareImage(sub_vec_img);
+        auto t_end_pre = std::chrono::high_resolution_clock::now();
+        float total_pre = std::chrono::duration<float, std::milli>(t_end_pre - t_start_pre).count();
+        std::cout << "fast-reid prepare image take: " << total_pre << " ms." << std::endl;
+        auto t_start = std::chrono::high_resolution_clock::now();
+        auto *output = ModelInference(image_data);
+        auto t_end = std::chrono::high_resolution_clock::now();
+        float total_inf = std::chrono::duration<float, std::milli>(t_end - t_start).count();
+        std::cout << "fast-reid inference take: " << total_inf << " ms." << std::endl;
+        auto r_start = std::chrono::high_resolution_clock::now();
+//        cv::Mat feature(BATCH_SIZE, outSize, CV_32FC1);
+        std::vector<cv::Mat> feature;
+        ReshapeandNormalize(output, feature, iter_2 - iter_1, outSize);
+        res_feature.insert(res_feature.end(), feature.begin(), feature.end());
+        auto r_end = std::chrono::high_resolution_clock::now();
+        float total_res = std::chrono::duration<float, std::milli>(r_end - r_start).count();
+        std::cout << "fast-reid post process take: " << total_res << " ms." << std::endl;
+        delete output;
+        start_index += BATCH_SIZE;
+    }
+    auto end_time = std::chrono::high_resolution_clock::now();
+    float total_time = std::chrono::duration<float, std::milli>(end_time - start_time).count();
+    std::cout << "fast-reid inference one frame take: " << total_time << " ms." << std::endl;
+    return res_feature;
+}
+
+std::vector<cv::Mat> fastreid::CropSubImages(const cv::Mat &org_img, const std::vector<DetectRes> &detection) {
+    std::vector<cv::Mat> vec_mat;
+    for (const auto &bbox : detection) {
+        int x1 = std::max(int(bbox.x - bbox.w / 2), 0), y1 = std::max(int(bbox.y - bbox.h / 2), 0),
+        x2 = std::min(int(bbox.x + bbox.w / 2), org_img.cols), y2 = std::min(int(bbox.y + bbox.h / 2), org_img.rows);
+        cv::Rect rect{x1, y1, x2 - x1, y2 - y1};
+        cv::Mat sub_img = org_img(rect);
+        vec_mat.push_back(sub_img);
+    }
+    return vec_mat;
+}
+
+std::vector<std::vector<cv::Mat>> fastreid::InferenceImages(const std::vector<cv::Mat> &vec_img,
+                                                            const std::vector<std::vector<DetectRes>> &detections) {
+    assert(vec_img.size() == detections.size());
+    std::vector<std::vector<cv::Mat>> res_feature;
+    for (int i = 0; i < (int)vec_img.size(); i++) {
+        const cv::Mat &org_img = vec_img[i];
+        const std::vector<DetectRes> detection = detections[i];
+        auto vec_mat = CropSubImages(org_img, detection);
+        auto vec_features = InferenceImages(vec_mat);
+        res_feature.push_back(vec_features);
+    }
+    return res_feature;
+}
 
 std::vector<float> fastreid::prepareImage(std::vector<cv::Mat> &vec_img) {
     std::vector<float> result(BATCH_SIZE * IMAGE_WIDTH * IMAGE_HEIGHT * INPUT_CHANNEL);
@@ -123,11 +117,11 @@ float *fastreid::ModelInference(std::vector<float> image_data) {
     return out;
 }
 
-void fastreid::ReshapeandNormalize(float *out, cv::Mat &feature, const int &MAT_SIZE, const int &outSize) {
+void fastreid::ReshapeandNormalize(float *out, std::vector<cv::Mat> &feature, const int &MAT_SIZE, const int &outSize) {
     for (int i = 0; i < MAT_SIZE; i++)
     {
         cv::Mat onefeature(1, outSize, CV_32FC1, out + i * outSize);
         cv::normalize(onefeature, onefeature);
-        onefeature.copyTo(feature.row(i));
+        feature.push_back(onefeature.clone());
     }
 }

@@ -57,7 +57,7 @@ StateType KalmanTracker::predict()
 
 
 // Update the state vector with observed bounding box.
-void KalmanTracker::update(StateType stateMat, int classes, float prob)
+void KalmanTracker::update(StateType stateMat, int classes, float prob, cv::Mat feature)
 {
 	m_time_since_update = 0;
 	m_history.clear();
@@ -65,6 +65,7 @@ void KalmanTracker::update(StateType stateMat, int classes, float prob)
 	m_hit_streak += 1;
     m_classes = classes;
     m_prob = prob;
+    m_feature = feature.clone();
 
 	// measurement
 	measurement.at<float>(0, 0) = stateMat.x + stateMat.width / 2;

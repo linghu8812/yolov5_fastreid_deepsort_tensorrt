@@ -14,6 +14,13 @@ struct ClassRes{
     float prob;
 };
 
+struct DetectRes : ClassRes{
+    float x;
+    float y;
+    float w;
+    float h;
+};
+
 class Model
 {
 public:

@@ -6,13 +6,6 @@
 #include "model.h"
 #include "yaml-cpp/yaml.h"
 
-struct DetectRes : ClassRes{
-    float x;
-    float y;
-    float w;
-    float h;
-};
-
 class YOLOv5 : public Model
 {
 public:

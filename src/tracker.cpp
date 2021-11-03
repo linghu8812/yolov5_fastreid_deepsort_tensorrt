@@ -8,6 +8,7 @@
 ObjectTracker::ObjectTracker(const YAML::Node &config) {
     max_age = config["max_age"].as<int>();
     iou_threshold = config["iou_threshold"].as<float>();
+    sim_threshold = config["sim_threshold"].as<float>();
     labels_file = config["labels_file"].as<std::string>();
     class_labels = readClassLabel(labels_file);
     id_colors.resize(100);
@@ -41,16 +42,21 @@ float ObjectTracker::IOUCalculate(const TrackerRes &det_a, const TrackerRes &det
         return inter_area / union_area - distance_d / distance_c;
 }
 
-void ObjectTracker::update(const std::vector<DetectRes> &det_boxes, int width, int height) {
+void ObjectTracker::update(const std::vector<DetectRes> &det_boxes, const std::vector<cv::Mat> &det_features,
+        int width, int height) {
     tracker_boxes.clear();
+    int index = 0;
     for (const auto &det_box : det_boxes) {
         TrackerRes tracker_box(det_box.classes, det_box.prob, det_box.x, det_box.y, det_box.w, det_box.h, -1);
+        tracker_box.feature = det_features[index];
+        index++;
         tracker_boxes.push_back(tracker_box);
     }
     if (kalman_boxes.empty()) {
         for (auto &tracker_box : tracker_boxes) {
             StateType rect_box = { tracker_box.x, tracker_box.y, tracker_box.w, tracker_box.h };
             KalmanTracker tracker = KalmanTracker(rect_box, tracker_box.classes, tracker_box.prob);
+            tracker.m_feature = tracker_box.feature.clone();
             tracker_box.object_id = tracker.m_id;
             kalman_boxes.push_back(tracker);
         }
@@ -69,6 +75,7 @@ void ObjectTracker::update(const std::vector<DetectRes> &det_boxes, int width, i
 
         TrackerRes trk_box(it->m_classes, it->m_prob, pBox.x, pBox.y, pBox.width, pBox.height, it->m_id);
         trk_box.classes = it->m_classes;
+        trk_box.feature = it->m_feature;
         if (!(time_since_update or is_nan or is_bound or is_illegal))
         {
             predict_boxes.push_back(trk_box);
@@ -87,11 +94,14 @@ void ObjectTracker::update(const std::vector<DetectRes> &det_boxes, int width, i
     for (unsigned int i = 0; i < trk_num; i++) { // compute iou matrix as a distance matrix
         for (unsigned int j = 0; j < det_num; j++) {
             // use 1-iou because the hungarian algorithm computes a minimum-cost assignment.
-            if (predict_boxes[i].classes == tracker_boxes[j].classes)
-                iouMatrix[i][j] = 1 - IOUCalculate(predict_boxes[i], tracker_boxes[j]);
-            else
+            if (predict_boxes[i].classes == tracker_boxes[j].classes) {
+//                iouMatrix[i][j] = 1 - IOUCalculate(predict_boxes[i], tracker_boxes[j]);
+                iouMatrix[i][j] = 1 - predict_boxes[i].feature.dot(tracker_boxes[j].feature);
+            } else
                 iouMatrix[i][j] = 1;
+//            std::cout << iouMatrix[i][j] << " ";
         }
+//        std::cout << std::endl;
     }
     std::vector<int> assignment;
     HungarianAlgorithm HungAlgo;
@@ -123,7 +133,7 @@ void ObjectTracker::update(const std::vector<DetectRes> &det_boxes, int width, i
     for (unsigned int i = 0; i < trk_num; ++i) {
         if (assignment[i] == -1) // pass over invalid values
             continue;
-        if (1 - iouMatrix[i][assignment[i]] < iou_threshold) {
+        if (1 - iouMatrix[i][assignment[i]] < sim_threshold) {
             unmatchedTrajectories.insert(i);
             unmatchedDetections.insert(assignment[i]);
         }
@@ -136,7 +146,8 @@ void ObjectTracker::update(const std::vector<DetectRes> &det_boxes, int width, i
         int det_id = matchedPair.y;
         StateType rect_box = { tracker_boxes[det_id].x, tracker_boxes[det_id].y,
                                tracker_boxes[det_id].w, tracker_boxes[det_id].h };
-        kalman_boxes[trk_id].update(rect_box, tracker_boxes[det_id].classes, tracker_boxes[det_id].prob);
+        kalman_boxes[trk_id].update(rect_box, tracker_boxes[det_id].classes, tracker_boxes[det_id].prob,
+                tracker_boxes[det_id].feature);
         tracker_boxes[det_id].object_id = kalman_boxes[trk_id].m_id;
     }
     for (auto umd : unmatchedDetections) {
@@ -144,6 +155,7 @@ void ObjectTracker::update(const std::vector<DetectRes> &det_boxes, int width, i
                                tracker_boxes[umd].w, tracker_boxes[umd].h };
         KalmanTracker tracker = KalmanTracker(rect_box, tracker_boxes[umd].classes, tracker_boxes[umd].prob);
         tracker_boxes[umd].object_id = tracker.m_id;
+        tracker.m_feature =  tracker_boxes[umd].feature.clone();
         kalman_boxes.push_back(tracker);
     }
 }

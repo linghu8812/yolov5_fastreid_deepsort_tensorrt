@@ -6,7 +6,7 @@ yolov5:
     INPUT_CHANNEL: 3
     IMAGE_WIDTH:   640
     IMAGE_HEIGHT:  640
-    obj_threshold: 0.4
+    obj_threshold: 0.25
     nms_threshold: 0.45
     strides:       [8, 16, 32]
     num_anchors:   [3,  3,  3]
@@ -15,12 +15,13 @@ yolov5:
 tracker:
     max_age: 70
     iou_threshold: 0.3
+    sim_threshold: 0.5
     labels_file:   "../configs/traffic.names"
 
 fastreid:
     onnx_file:     "../weights/fast-reid_mobilenetv2.onnx"
     engine_file:   "../weights/fast-reid_mobilenetv2.trt"
-    BATCH_SIZE:    1
+    BATCH_SIZE:    32
     INPUT_CHANNEL: 3
     IMAGE_WIDTH:   128
     IMAGE_HEIGHT:  256

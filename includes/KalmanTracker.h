@@ -45,7 +45,7 @@ public:
 	}
 
 	StateType predict();
-	void update(StateType stateMat, int classes, float prob);
+	void update(StateType stateMat, int classes, float prob, cv::Mat feature);
 	
 	StateType get_state();
 	StateType get_rect_xysr(float cx, float cy, float s, float r);
@@ -59,6 +59,7 @@ public:
 	int m_id;
 	int m_classes;
 	float m_prob;
+	cv::Mat m_feature;
 
 private:
 	void init_kf(StateType stateMat);
