@@ -28,9 +28,17 @@ public:
     std::vector<TrackerRes> tracker_boxes;
 private:
     static float IOUCalculate(const TrackerRes &det_a, const TrackerRes &det_b);
+    void Alignment(std::vector<std::vector<double>> mat, std::set<int> &unmatchedDetections,
+                   std::set<int> &unmatchedTrajectories, std::vector<cv::Point> &matchedPairs,
+                   int det_num, int trk_num, bool b_iou);
+    void FeatureMatching(const std::vector<TrackerRes> &predict_boxes, std::set<int> &unmatchedDetections,
+            std::set<int> &unmatchedTrajectories, std::vector<cv::Point> &matchedPairs);
+    void IOUMatching(const std::vector<TrackerRes> &predict_boxes, std::set<int> &unmatchedDetections,
+                         std::set<int> &unmatchedTrajectories, std::vector<cv::Point> &matchedPairs);
     int max_age;
     float iou_threshold;
     float sim_threshold;
+    bool agnostic;
     std::vector<KalmanTracker> kalman_boxes;
     std::map<int, std::string> class_labels;
     std::string labels_file;

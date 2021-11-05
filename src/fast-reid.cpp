@@ -15,7 +15,6 @@ fastreid::~fastreid() = default;
 std::vector<cv::Mat> fastreid::InferenceImages(std::vector<cv::Mat> &vec_img) {
     std::vector<cv::Mat> res_feature;
     int start_index = 0, end_index = 0;
-    auto start_time = std::chrono::high_resolution_clock::now();
     while (end_index < (int)vec_img.size()) {
         end_index = std::min(int(start_index + BATCH_SIZE), int(vec_img.size()));
         std::vector<cv::Mat>::const_iterator iter_1 = vec_img.begin() + start_index;
@@ -42,9 +41,6 @@ std::vector<cv::Mat> fastreid::InferenceImages(std::vector<cv::Mat> &vec_img) {
         delete output;
         start_index += BATCH_SIZE;
     }
-    auto end_time = std::chrono::high_resolution_clock::now();
-    float total_time = std::chrono::duration<float, std::milli>(end_time - start_time).count();
-    std::cout << "fast-reid inference one frame take: " << total_time << " ms." << std::endl;
     return res_feature;
 }
 
@@ -106,11 +102,9 @@ float *fastreid::ModelInference(std::vector<float> image_data) {
         return out;
     }
     // DMA the input to the GPU,  execute the batch asynchronously, and DMA it back:
-    std::cout << "host2device" << std::endl;
     cudaMemcpyAsync(buffers[0], image_data.data(), bufferSize[0], cudaMemcpyHostToDevice, stream);
 
     // do inference
-    std::cout << "execute" << std::endl;
     context->execute(BATCH_SIZE, buffers);
     cudaMemcpyAsync(out, buffers[1], bufferSize[1], cudaMemcpyDeviceToHost, stream);
     cudaStreamSynchronize(stream);

@@ -23,6 +23,7 @@ private:
     std::map<int, std::string> class_labels;
     float obj_threshold;
     float nms_threshold;
+    bool agnostic;
     std::vector<int> strides;
     std::vector<std::vector<int>> anchors;
     std::vector<std::vector<int>> grids;

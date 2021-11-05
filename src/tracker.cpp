@@ -9,6 +9,7 @@ ObjectTracker::ObjectTracker(const YAML::Node &config) {
     max_age = config["max_age"].as<int>();
     iou_threshold = config["iou_threshold"].as<float>();
     sim_threshold = config["sim_threshold"].as<float>();
+    agnostic = config["agnostic"].as<bool>();
     labels_file = config["labels_file"].as<std::string>();
     class_labels = readClassLabel(labels_file);
     id_colors.resize(100);
@@ -40,6 +41,126 @@ float ObjectTracker::IOUCalculate(const TrackerRes &det_a, const TrackerRes &det
         return 0;
     else
         return inter_area / union_area - distance_d / distance_c;
+}
+
+void ObjectTracker::Alignment(std::vector<std::vector<double>> mat, std::set<int> &unmatchedDetections,
+                              std::set<int> &unmatchedTrajectories, std::vector<cv::Point> &matchedPairs,
+                              int det_num, int trk_num, bool b_iou) {
+    std::vector<int> assignment;
+    HungarianAlgorithm HungAlgo;
+    HungAlgo.Solve(mat, assignment);
+
+    std::set<int> allItems;
+    std::set<int> matchedItems;
+
+    if (b_iou) {
+        std::vector<int> detection_index(unmatchedDetections.size());
+        std::vector<int> tracker_index(unmatchedTrajectories.size());
+        int idx = 0;
+        for (const int &umd:unmatchedDetections) {
+            detection_index[idx] = umd;
+            idx++;
+        }
+        idx = 0;
+        for (const int &umt:unmatchedTrajectories) {
+            tracker_index[idx] = umt;
+            idx++;
+        }
+        unmatchedDetections.clear();
+        unmatchedTrajectories.clear();
+        if (det_num > trk_num) { //	there are unmatched detections
+            for (unsigned int n = 0; n < det_num; n++)
+                allItems.insert(detection_index[n]);
+
+            for (unsigned int i = 0; i < trk_num; ++i)
+                matchedItems.insert(detection_index[assignment[i]]);
+
+            set_difference(allItems.begin(), allItems.end(),
+                           matchedItems.begin(), matchedItems.end(),
+                           std::insert_iterator<std::set<int>>(unmatchedDetections, unmatchedDetections.begin()));
+        }
+        else if (det_num < trk_num) { // there are unmatched trajectory/predictions
+            for (unsigned int i = 0; i < trk_num; ++i)
+                if (assignment[i] == -1) // unassigned label will be set as -1 in the assignment algorithm
+                    unmatchedTrajectories.insert(tracker_index[i]);
+        }
+        for (unsigned int i = 0; i < trk_num; ++i) {
+            if (assignment[i] == -1) // pass over invalid values
+                continue;
+            if (1 - mat[i][assignment[i]] < iou_threshold) {
+                unmatchedTrajectories.insert(tracker_index[i]);
+                unmatchedDetections.insert(detection_index[assignment[i]]);
+            }
+            else
+                matchedPairs.emplace_back(cv::Point(tracker_index[i], detection_index[assignment[i]]));
+        }
+    } else {
+        if (det_num > trk_num) { //	there are unmatched detections
+            for (unsigned int n = 0; n < det_num; n++)
+                allItems.insert(n);
+
+            for (unsigned int i = 0; i < trk_num; ++i)
+                matchedItems.insert(assignment[i]);
+
+            set_difference(allItems.begin(), allItems.end(),
+                           matchedItems.begin(), matchedItems.end(),
+                           std::insert_iterator<std::set<int>>(unmatchedDetections, unmatchedDetections.begin()));
+        }
+        else if (det_num < trk_num) { // there are unmatched trajectory/predictions
+            for (unsigned int i = 0; i < trk_num; ++i)
+                if (assignment[i] == -1) // unassigned label will be set as -1 in the assignment algorithm
+                    unmatchedTrajectories.insert(i);
+        }
+        for (unsigned int i = 0; i < trk_num; ++i) {
+            if (assignment[i] == -1) // pass over invalid values
+                continue;
+            if (1 - mat[i][assignment[i]] < sim_threshold) {
+                unmatchedTrajectories.insert(i);
+                unmatchedDetections.insert(assignment[i]);
+            }
+            else
+                matchedPairs.emplace_back(cv::Point(i, assignment[i]));
+        }
+    }
+}
+
+void ObjectTracker::FeatureMatching(const std::vector<TrackerRes> &predict_boxes, std::set<int> &unmatchedDetections,
+                                    std::set<int> &unmatchedTrajectories, std::vector<cv::Point> &matchedPairs) {
+    int det_num = tracker_boxes.size();
+    int trk_num = predict_boxes.size();
+    std::vector<std::vector<double>> similar_mat(trk_num, std::vector<double>(det_num, 0));
+    for (unsigned int i = 0; i < trk_num; i++) { // compute iou matrix as a distance matrix
+        for (unsigned int j = 0; j < det_num; j++) {
+            // use 1-iou because the hungarian algorithm computes a minimum-cost assignment.
+            if (predict_boxes[i].classes == tracker_boxes[j].classes or agnostic) {
+                similar_mat[i][j] = 1 - predict_boxes[i].feature.dot(tracker_boxes[j].feature);
+            } else
+                similar_mat[i][j] = 1;
+        }
+    }
+    Alignment(similar_mat, unmatchedDetections, unmatchedTrajectories, matchedPairs, det_num, trk_num, false);
+}
+
+void ObjectTracker::IOUMatching(const std::vector<TrackerRes> &predict_boxes, std::set<int> &unmatchedDetections,
+                                std::set<int> &unmatchedTrajectories, std::vector<cv::Point> &matchedPairs) {
+    int det_num = unmatchedDetections.size();
+    int trk_num = unmatchedTrajectories.size();
+    if (det_num == 0 or trk_num == 0)
+        return;
+    std::vector<std::vector<double>> iou_mat(trk_num, std::vector<double>(det_num, 0));
+    int i = 0;
+    for (const int &umt : unmatchedTrajectories) { // compute iou matrix as a distance matrix
+        int j = 0;
+        for (const int &umd : unmatchedDetections) {
+            if (predict_boxes[umt].classes == tracker_boxes[umd].classes or agnostic) {
+                iou_mat[i][j] = 1 - IOUCalculate(predict_boxes[umt], tracker_boxes[umd]);
+            } else
+                iou_mat[i][j] = 1;
+            j++;
+        }
+        i++;
+    }
+    Alignment(iou_mat, unmatchedDetections, unmatchedTrajectories, matchedPairs, det_num, trk_num, true);
 }
 
 void ObjectTracker::update(const std::vector<DetectRes> &det_boxes, const std::vector<cv::Mat> &det_features,
@@ -87,59 +208,12 @@ void ObjectTracker::update(const std::vector<DetectRes> &det_boxes, const std::v
             //cerr << "Box invalid at frame: " << frame_count << endl;
         }
     }
-    int det_num = tracker_boxes.size();
-    int trk_num = predict_boxes.size();
-    std::vector<std::vector<double>> iouMatrix;
-    iouMatrix.resize(trk_num, std::vector<double>(det_num, 0));
-    for (unsigned int i = 0; i < trk_num; i++) { // compute iou matrix as a distance matrix
-        for (unsigned int j = 0; j < det_num; j++) {
-            // use 1-iou because the hungarian algorithm computes a minimum-cost assignment.
-            if (predict_boxes[i].classes == tracker_boxes[j].classes) {
-//                iouMatrix[i][j] = 1 - IOUCalculate(predict_boxes[i], tracker_boxes[j]);
-                iouMatrix[i][j] = 1 - predict_boxes[i].feature.dot(tracker_boxes[j].feature);
-            } else
-                iouMatrix[i][j] = 1;
-//            std::cout << iouMatrix[i][j] << " ";
-        }
-//        std::cout << std::endl;
-    }
-    std::vector<int> assignment;
-    HungarianAlgorithm HungAlgo;
-    HungAlgo.Solve(iouMatrix, assignment);
 
     std::set<int> unmatchedDetections;
     std::set<int> unmatchedTrajectories;
-    std::set<int> allItems;
-    std::set<int> matchedItems;
-
-    if (det_num > trk_num) { //	there are unmatched detections
-        for (unsigned int n = 0; n < det_num; n++)
-            allItems.insert(n);
-
-        for (unsigned int i = 0; i < trk_num; ++i)
-            matchedItems.insert(assignment[i]);
-
-        set_difference(allItems.begin(), allItems.end(),
-                       matchedItems.begin(), matchedItems.end(),
-                       std::insert_iterator<std::set<int>>(unmatchedDetections, unmatchedDetections.begin()));
-    }
-    else if (det_num < trk_num) { // there are unmatched trajectory/predictions
-        for (unsigned int i = 0; i < trk_num; ++i)
-            if (assignment[i] == -1) // unassigned label will be set as -1 in the assignment algorithm
-                unmatchedTrajectories.insert(i);
-    }
-
     std::vector<cv::Point> matchedPairs;
-    for (unsigned int i = 0; i < trk_num; ++i) {
-        if (assignment[i] == -1) // pass over invalid values
-            continue;
-        if (1 - iouMatrix[i][assignment[i]] < sim_threshold) {
-            unmatchedTrajectories.insert(i);
-            unmatchedDetections.insert(assignment[i]);
-        }
-        else
-            matchedPairs.emplace_back(cv::Point(i, assignment[i]));
-    }
+    FeatureMatching(predict_boxes, unmatchedDetections, unmatchedTrajectories, matchedPairs);
+    IOUMatching(predict_boxes, unmatchedDetections, unmatchedTrajectories, matchedPairs);
 
     for (auto & matchedPair : matchedPairs) {
         int trk_id = matchedPair.x;

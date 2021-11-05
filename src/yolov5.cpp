@@ -11,6 +11,7 @@ YOLOv5::YOLOv5(const YAML::Node &config) {
     IMAGE_HEIGHT = config["IMAGE_HEIGHT"].as<int>();
     obj_threshold = config["obj_threshold"].as<float>();
     nms_threshold = config["nms_threshold"].as<float>();
+    agnostic = config["agnostic"].as<bool>();
     strides = config["strides"].as<std::vector<int>>();
     anchors = config["anchors"].as<std::vector<std::vector<int>>>();
     class_labels = readClassLabel(labels_file);
@@ -83,11 +84,9 @@ float *YOLOv5::ModelInference(std::vector<float> image_data) {
         return out;
     }
     // DMA the input to the GPU,  execute the batch asynchronously, and DMA it back:
-    std::cout << "host2device" << std::endl;
     cudaMemcpyAsync(buffers[0], image_data.data(), bufferSize[0], cudaMemcpyHostToDevice, stream);
 
     // do inference
-    std::cout << "execute" << std::endl;
     context->execute(BATCH_SIZE, buffers);
     cudaMemcpyAsync(out, buffers[1], bufferSize[1], cudaMemcpyDeviceToHost, stream);
     cudaStreamSynchronize(stream);
@@ -142,7 +141,7 @@ void YOLOv5::NmsDetect(std::vector<DetectRes> &detections) {
     for (int i = 0; i < (int)detections.size(); i++)
         for (int j = i + 1; j < (int)detections.size(); j++)
         {
-            if (detections[i].classes == detections[j].classes)
+            if (detections[i].classes == detections[j].classes or agnostic)
             {
                 float iou = IOUCalculate(detections[i], detections[j]);
                 if (iou > nms_threshold)
