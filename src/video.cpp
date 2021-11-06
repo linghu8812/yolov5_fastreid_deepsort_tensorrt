@@ -20,15 +20,9 @@ void InferenceVideo(const std::string &video_name, YOLOv5 &yolov5, ObjectTracker
         vec_org_img.push_back(src_img);
         auto detect_boxes = yolov5.InferenceImages(vec_org_img);
         auto object_features = fastreid.InferenceImages(vec_org_img, detect_boxes);
-        for (const auto &item : object_features[0]) {
-            if (cv::norm(item, cv::NORM_L2) > 1.1) {
-                std::cout << cv::norm(item, cv::NORM_L2) << std::endl;
-                std::cout << item << std::endl;
-                int a = 0;
-            }
-        }
         tracker.update(detect_boxes[0], object_features[0], vec_org_img[0].cols, vec_org_img[0].rows);
         tracker.DrawResults(vec_org_img[0]);
+        cv::imwrite("../results.jpg", vec_org_img[0]);
         video_writer.write(vec_org_img[0]);
     }
 }

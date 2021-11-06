@@ -59,7 +59,7 @@ Run the following command
 
 results demo:
 
-<video src="https://www.bilibili.com/video/BV1qg411K74p?t=88.3" controls="controls" width="800" height="600">您的浏览器不支持播放该视频！</video>
+[![tensorrt_tracker](samples/results.jpg)](https://www.bilibili.com/video/BV1qg411K74p?t=0.0)
 
 ## **Reference**
 
